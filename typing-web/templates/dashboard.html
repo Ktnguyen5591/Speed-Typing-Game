@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: monospace; background:#1e1e2e; color:#eee; padding:30px; }
+  table { border-collapse: collapse; margin:10px 0; }
+  td, th { border:1px solid #444; padding:6px 12px; }
+  .kb-row { margin:6px 0; }
+  .key { display:inline-block; min-width:38px; height:38px; line-height:38px; text-align:center;
+         margin:2px; border-radius:6px; padding:0 6px; }
+  .k-ok { background:#2e7d32; } .k-mid { background:#b8860b; }
+  .k-bad { background:#b71c1c; } .k-na { background:#333; color:#777; }
+  .space { min-width:300px; }
+  a { color:#8be9fd; }
+  canvas { max-width:700px; }
+</style>
+</head>
+<body>
+<h2>Dashboard Phân tích Thói quen Gõ phím</h2>
+<p><a href="/">← Chơi lại</a></p>
+
+<h3>Xu hướng WPM (20 lượt gần nhất)</h3>
+<canvas id="wpmChart" height="120"></canvas>
+
+<h3>Bản đồ nhiệt bàn phím (đỏ = hay sai)</h3>
+{% for row in layout %}
+<div class="kb-row">
+  {% for ch in row %}
+    {% set h = heat.get(ch) %}
+    <span class="key {{ 'space' if ch == ' ' }} {{ h.cls if h else 'k-na' }}"
+          title="{{ ch }}: {{ h.errs if h else 0 }} lỗi, delay {{ h.delay if h else '-' }}ms">{{ 'SPACE' if ch == ' ' else ch }}</span>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<h3>Lịch sử lượt chơi</h3>
+<table>
+<tr><th>#</th><th>WPM</th><th>Accuracy</th><th>Ký tự</th><th>Lỗi</th><th>Thời điểm</th></tr>
+{% for s in sessions %}
+<tr><td>{{ s['id'] }}</td><td>{{ s['wpm'] }}</td><td>{{ s['accuracy'] }}%</td>
+    <td>{{ s['total_chars'] }}</td><td>{{ s['errors'] }}</td><td>{{ s['created_at'] }}</td></tr>
+{% else %}
+<tr><td colspan="6">Chưa có dữ liệu — hãy chơi một lượt!</td></tr>
+{% endfor %}
+</table>
+
+<script>
+const wpmData = {{ wpm_history | tojson }};
+new Chart(document.getElementById('wpmChart'), {
+  type: 'line',
+  data: {
+    labels: wpmData.map((_, i) => i + 1),
+    datasets: [{ label: 'WPM', data: wpmData, borderColor: '#8be9fd', tension: 0.3 }]
+  },
+  options: { scales: { y: { beginAtZero: true } } }
+});
+</script>
+</body>
+</html>

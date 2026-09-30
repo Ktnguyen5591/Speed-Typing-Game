@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Speed Typing</title>
+<style>
+  body { font-family: monospace; background:#1e1e2e; color:#eee; text-align:center; padding-top:40px; }
+  #sentence { font-size:26px; letter-spacing:2px; }
+  .ok { color:#7CFC9A; } .bad { color:#ff5c5c; } .cur { background:#444; } .todo { color:#777; }
+  #stats { margin:20px; color:#ffd166; }
+  a { color:#8be9fd; }
+</style>
+</head>
+<body>
+<h2>Speed Typing Web</h2>
+<p id="stats">Time: <span id="time">0.0</span>s | WPM: <span id="wpm">0</span> | Acc: <span id="acc">100</span>%</p>
+<p id="sentence"></p>
+<p id="msg">Bấm phím bất kỳ để bắt đầu...</p>
+<p><a href="/dashboard">Dashboard</a></p>
+<script>
+const sentence = {{ sentence | tojson }};
+const el = document.getElementById('sentence');
+let idx = 0, start = null, last = null, keys = [], correctCount = 0, done = false;
+
+function render() {
+  el.innerHTML = sentence.split('').map((ch, i) => {
+    const cls = i < idx ? (keys[i].correct ? 'ok' : 'bad') : (i === idx ? 'cur' : 'todo');
+    return '<span class="' + cls + '">' + (ch === ' ' ? '&nbsp;' : ch) + '</span>';
+  }).join('');
+}
+render();
+
+document.addEventListener('keydown', e => {
+  if (done) return;
+  if (e.key === 'Backspace') {
+    if (idx > 0) { idx--; const k = keys.pop(); if (k.correct) correctCount--; render(); }
+    e.preventDefault();
+    return;
+  }
+  if (e.key.length !== 1) return;
+  e.preventDefault();
+  const now = performance.now();
+  if (start === null) { start = now; document.getElementById('msg').textContent = 'Gõ đi!'; }
+  const delay = last ? Math.round(now - last) : 0;
+  last = now;
+  const expected = sentence[idx];
+  const correct = (e.key === expected);
+  if (correct) correctCount++;
+  keys.push({expected, typed: e.key, correct, delay_ms: delay});
+  idx++;
+  render();
+  const elapsed = (now - start) / 1000;
+  document.getElementById('time').textContent = elapsed.toFixed(1);
+  const wpm = elapsed > 0 ? (idx / 5) / (elapsed / 60) : 0;
+  document.getElementById('wpm').textContent = Math.round(wpm);
+  document.getElementById('acc').textContent = Math.round(correctCount / keys.length * 100);
+  if (idx >= sentence.length) finish(elapsed, wpm);
+});
+
+function finish(elapsed, wpm) {
+  done = true;
+  const acc = Math.round(correctCount / keys.length * 100);
+  document.getElementById('msg').innerHTML =
+    'Xong! WPM: ' + Math.round(wpm) + ' | Accuracy: ' + acc +
+    '% — <a href="/">Chơi lại</a>';
+  fetch('/api/submit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      wpm: Math.round(wpm), accuracy: acc,
+      total_chars: keys.length,
+      errors: keys.length - correctCount,
+      keystrokes: keys
+    })
+  });
+}
+</script>
+</body>
+</html>
