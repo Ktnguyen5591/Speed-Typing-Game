@@ -1,21 +1,24 @@
 import os
 import random
+import secrets
 import sqlite3
+import time
 
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "typing.db")
+SENTENCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sentences.txt")
 
-SENTENCES = [
-    "the quick brown fox jumps over the lazy dog",
-    "practice makes perfect when you type every day",
-    "typing fast is good but typing right is better",
-    "keep your fingers relaxed and eyes on the screen",
-    "slow is smooth and smooth is fast when typing",
-]
+TOKENS = set()        # token một lần cho mỗi lượt chơi
+LAST_SUBMIT = {}      # chặn spam theo IP
 
 KB_LAYOUT = ["qwertyuiop", "asdfghjkl", "zxcvbnm", " "]
+
+
+def load_sentences():
+    with open(SENTENCES_PATH, encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
 
 
 def get_db():
@@ -43,21 +46,55 @@ init_db()
 
 @app.route("/")
 def index():
-    return render_template("index.html", sentence=random.choice(SENTENCES))
+    token = secrets.token_hex(8)
+    TOKENS.add(token)
+    return render_template("index.html",
+                           sentence=random.choice(load_sentences()),
+                           token=token)
 
 
 @app.route("/api/submit", methods=["POST"])
 def submit():
-    data = request.get_json()
+    # Lớp 1: mỗi IP tối đa 1 submit / 5 giây
+    ip = request.remote_addr or "unknown"
+    now = time.time()
+    if now - LAST_SUBMIT.get(ip, 0) < 5:
+        return jsonify(status="too fast"), 429
+    LAST_SUBMIT[ip] = now
+
+    data = request.get_json(silent=True) or {}
+
+    # Lớp 2: token một lần (bot không tải trang game thì không có token)
+    token = data.get("token", "")
+    if token not in TOKENS:
+        return jsonify(status="invalid token"), 403
+    TOKENS.discard(token)
+
+    # Lớp 3: server tự tính mọi chỉ số, không tin client
+    keystrokes = data.get("keystrokes", [])
+    if not keystrokes or len(keystrokes) > 2000:
+        return jsonify(status="invalid"), 400
+    total = len(keystrokes)
+    correct = sum(1 for k in keystrokes if k.get("correct"))
+    errors = total - correct
+    elapsed = sum(k.get("delay_ms", 0) for k in keystrokes) / 1000.0
+    if elapsed <= 0:
+        return jsonify(status="invalid"), 400
+    wpm = round((total / 5.0) / (elapsed / 60.0), 1)
+    accuracy = round(correct / total * 100, 1)
+    if wpm > 250:
+        return jsonify(status="invalid"), 400
+
     conn = get_db()
     cur = conn.execute(
         "INSERT INTO sessions(wpm, accuracy, total_chars, errors) VALUES (?,?,?,?)",
-        (data["wpm"], data["accuracy"], data["total_chars"], data["errors"]))
+        (wpm, accuracy, total, errors))
     sid = cur.lastrowid
-    for k in data.get("keystrokes", []):
+    for k in keystrokes:
         conn.execute(
             "INSERT INTO keystrokes(session_id, expected, typed, correct, delay_ms) VALUES (?,?,?,?,?)",
-            (sid, k["expected"], k["typed"], 1 if k["correct"] else 0, k["delay_ms"]))
+            (sid, k.get("expected", ""), k.get("typed", ""),
+             1 if k.get("correct") else 0, k.get("delay_ms", 0)))
     conn.commit()
     conn.close()
     return jsonify(status="ok", session_id=sid)

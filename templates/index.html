@@ -16,9 +16,9 @@
 <p id="stats">Time: <span id="time">0.0</span>s | WPM: <span id="wpm">0</span> | Acc: <span id="acc">100</span>%</p>
 <p id="sentence"></p>
 <p id="msg">Bấm phím bất kỳ để bắt đầu...</p>
-<p><a href="/dashboard">Dashboard</a></p>
 <script>
 const sentence = {{ sentence | tojson }};
+const TOKEN = {{ token | tojson }};
 const el = document.getElementById('sentence');
 let idx = 0, start = null, last = null, keys = [], correctCount = 0, done = false;
 
@@ -62,14 +62,12 @@ function finish(elapsed, wpm) {
   const acc = Math.round(correctCount / keys.length * 100);
   document.getElementById('msg').innerHTML =
     'Xong! WPM: ' + Math.round(wpm) + ' | Accuracy: ' + acc +
-    '% — <a href="/">Chơi lại</a>';
+    '% — <a href="/dashboard">Xem Dashboard</a> hoặc <a href="/">chơi lại</a>';
   fetch('/api/submit', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      wpm: Math.round(wpm), accuracy: acc,
-      total_chars: keys.length,
-      errors: keys.length - correctCount,
+      token: TOKEN,
       keystrokes: keys
     })
   });
