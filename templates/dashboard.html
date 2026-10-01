@@ -41,7 +41,7 @@
 <tr><th>#</th><th>WPM</th><th>Accuracy</th><th>Ký tự</th><th>Lỗi</th><th>Thời điểm</th></tr>
 {% for s in sessions %}
 <tr><td>{{ s['id'] }}</td><td>{{ s['wpm'] }}</td><td>{{ s['accuracy'] }}%</td>
-    <td>{{ s['total_chars'] }}</td><td>{{ s['errors'] }}</td><td>{{ s['created_at'] }}</td></tr>
+    <td>{{ s['total_chars'] }}</td><td>{{ s['errors'] }}</td><td>{{ s['created_at_vn'] }}</td></tr>
 {% else %}
 <tr><td colspan="6">Chưa có dữ liệu — hãy chơi một lượt!</td></tr>
 {% endfor %}

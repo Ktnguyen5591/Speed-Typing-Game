@@ -1,28 +1,41 @@
+"""Speed Typing Game - Flask web app + analytics dashboard."""
+
+# ==================================================================
+# 1. IMPORTS
+# ==================================================================
 import os
 import random
 import secrets
 import sqlite3
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from flask import Flask, render_template, request, jsonify
 
-app = Flask(__name__)
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "typing.db")
-SENTENCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sentences.txt")
+# ==================================================================
+# 2. CONFIG
+# ==================================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "typing.db")
+SENTENCES_PATH = os.path.join(BASE_DIR, "sentences.txt")
+
+UTC_TZ = ZoneInfo("UTC")
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+KB_LAYOUT = ["qwertyuiop", "asdfghjkl", "zxcvbnm", " "]
 
 TOKENS = set()        # token một lần cho mỗi lượt chơi
 LAST_SUBMIT = {}      # chặn spam theo IP
 
-KB_LAYOUT = ["qwertyuiop", "asdfghjkl", "zxcvbnm", " "]
+app = Flask(__name__)
 
 
-def load_sentences():
-    with open(SENTENCES_PATH, encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
-
-
+# ==================================================================
+# 3. DATABASE HELPERS
+# ==================================================================
 def get_db():
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -41,9 +54,37 @@ def init_db():
     conn.close()
 
 
-init_db()
+# ==================================================================
+# 4. UTILITY HELPERS
+# ==================================================================
+def load_sentences():
+    """Đọc danh sách câu gõ từ file sentences.txt."""
+    with open(SENTENCES_PATH, encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
 
 
+def to_vn(iso_str):
+    """Đổi timestamp UTC (từ SQLite) sang giờ Việt Nam để hiển thị."""
+    try:
+        dt = datetime.fromisoformat(iso_str).replace(tzinfo=UTC_TZ)
+        return dt.astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
+    except Exception:
+        return iso_str
+
+
+def build_heatmap(rows):
+    """Gom thống kê phím thành dict phục vụ bản đồ nhiệt."""
+    heat = {}
+    for r in rows:
+        errs = r["errs"] or 0
+        cls = "k-bad" if errs > 3 else "k-mid" if errs > 0 else "k-ok"
+        heat[r["expected"]] = {"cls": cls, "errs": errs, "delay": r["avg_delay"]}
+    return heat
+
+
+# ==================================================================
+# 5. ROUTES
+# ==================================================================
 @app.route("/")
 def index():
     token = secrets.token_hex(8)
@@ -55,7 +96,7 @@ def index():
 
 @app.route("/api/submit", methods=["POST"])
 def submit():
-    # Lớp 1: mỗi IP tối đa 1 submit / 5 giây
+    # Lớp 1: rate limit — mỗi IP tối đa 1 submit / 5 giây
     ip = request.remote_addr or "unknown"
     now = time.time()
     if now - LAST_SUBMIT.get(ip, 0) < 5:
@@ -64,7 +105,7 @@ def submit():
 
     data = request.get_json(silent=True) or {}
 
-    # Lớp 2: token một lần (bot không tải trang game thì không có token)
+    # Lớp 2: token một lần — bot không tải trang game thì không có token
     token = data.get("token", "")
     if token not in TOKENS:
         return jsonify(status="invalid token"), 403
@@ -110,17 +151,29 @@ def dashboard():
         FROM keystrokes GROUP BY expected""").fetchall()
     conn.close()
 
-    heat = {}
-    for r in rows:
-        errs = r["errs"] or 0
-        cls = "k-bad" if errs > 3 else "k-mid" if errs > 0 else "k-ok"
-        heat[r["expected"]] = {"cls": cls, "errs": errs, "delay": r["avg_delay"]}
+    # Lịch sử lượt chơi kèm thời gian hiển thị giờ Việt Nam
+    session_list = []
+    for s in sessions:
+        d = dict(s)
+        d["created_at_vn"] = to_vn(s["created_at"])
+        session_list.append(d)
 
-        wpm_history = [s["wpm"] for s in reversed(sessions)]
+    heat = build_heatmap(rows)
+    wpm_history = [s["wpm"] for s in reversed(sessions)]
     acc_history = [s["accuracy"] for s in reversed(sessions)]
-    return render_template("dashboard.html", sessions=sessions,
-                           layout=KB_LAYOUT, heat=heat,
-                           wpm_history=wpm_history, acc_history=acc_history)
+
+    return render_template("dashboard.html",
+                           sessions=session_list,
+                           layout=KB_LAYOUT,
+                           heat=heat,
+                           wpm_history=wpm_history,
+                           acc_history=acc_history)
+
+
+# ==================================================================
+# 6. ENTRY POINT
+# ==================================================================
+init_db()
 
 if __name__ == "__main__":
     app.run(debug=True)
