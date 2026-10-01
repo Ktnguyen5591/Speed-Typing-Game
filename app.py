@@ -25,8 +25,11 @@ VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 KB_LAYOUT = ["qwertyuiop", "asdfghjkl", "zxcvbnm", " "]
 
-TOKENS = set()        # token một lần cho mỗi lượt chơi
+TOKENS = {}           # token -> câu đã phát cho lượt chơi đó (một lần)
 LAST_SUBMIT = {}      # chặn spam theo IP
+
+MIN_AVG_DELAY_MS = 60   # trung bình < 60ms/phím => siêu nhân (~200 WPM+)
+MAX_WPM = 250
 
 app = Flask(__name__)
 
@@ -88,10 +91,9 @@ def build_heatmap(rows):
 @app.route("/")
 def index():
     token = secrets.token_hex(8)
-    TOKENS.add(token)
-    return render_template("index.html",
-                           sentence=random.choice(load_sentences()),
-                           token=token)
+    sentence = random.choice(load_sentences())
+    TOKENS[token] = sentence          # server nhớ: token này đi kèm câu này
+    return render_template("index.html", sentence=sentence, token=token)
 
 
 @app.route("/api/submit", methods=["POST"])
@@ -105,37 +107,55 @@ def submit():
 
     data = request.get_json(silent=True) or {}
 
-    # Lớp 2: token một lần — bot không tải trang game thì không có token
+    # Lớp 2: token một lần + lấy đúng câu gốc đã phát cho token đó
     token = data.get("token", "")
-    if token not in TOKENS:
+    sentence = TOKENS.pop(token, None)
+    if sentence is None:
         return jsonify(status="invalid token"), 403
-    TOKENS.discard(token)
 
-    # Lớp 3: server tự tính mọi chỉ số, không tin client
+    # Lớp 3: server TỰ đối chiếu từng phím với câu gốc, không tin client
     keystrokes = data.get("keystrokes", [])
-    if not keystrokes or len(keystrokes) > 2000:
+    if len(keystrokes) != len(sentence):
         return jsonify(status="invalid"), 400
+
+    delays = []
+    correct = 0
+    for i, k in enumerate(keystrokes):
+        if k.get("expected") != sentence[i]:
+            return jsonify(status="invalid"), 400      # sai thứ tự = không phải câu của tôi
+        if k.get("typed", "") == sentence[i]:          # server tự phán đúng/sai
+            correct += 1
+        d = k.get("delay_ms", 0)
+        if not isinstance(d, (int, float)) or d < 0 or d > 10000:
+            return jsonify(status="invalid"), 400
+        delays.append(d)
+
     total = len(keystrokes)
-    correct = sum(1 for k in keystrokes if k.get("correct"))
     errors = total - correct
-    elapsed = sum(k.get("delay_ms", 0) for k in keystrokes) / 1000.0
+    elapsed = sum(delays) / 1000.0
     if elapsed <= 0:
         return jsonify(status="invalid"), 400
     wpm = round((total / 5.0) / (elapsed / 60.0), 1)
     accuracy = round(correct / total * 100, 1)
-    if wpm > 250:
+
+    # Lớp 4: heuristic "có phải người thật không?"
+    if wpm > MAX_WPM:
         return jsonify(status="invalid"), 400
+    if sum(delays) / total < MIN_AVG_DELAY_MS:
+        return jsonify(status="superhuman"), 400       # phản xạ nhanh hơn người thật
+    if len(set(delays)) <= 2:
+        return jsonify(status="robotic"), 400          # delay đều tăm tắp = máy gõ
 
     conn = get_db()
     cur = conn.execute(
         "INSERT INTO sessions(wpm, accuracy, total_chars, errors) VALUES (?,?,?,?)",
         (wpm, accuracy, total, errors))
     sid = cur.lastrowid
-    for k in keystrokes:
+    for i, k in enumerate(keystrokes):
         conn.execute(
             "INSERT INTO keystrokes(session_id, expected, typed, correct, delay_ms) VALUES (?,?,?,?,?)",
-            (sid, k.get("expected", ""), k.get("typed", ""),
-             1 if k.get("correct") else 0, k.get("delay_ms", 0)))
+            (sid, sentence[i], k.get("typed", ""),
+             1 if k.get("typed", "") == sentence[i] else 0, int(delays[i])))
     conn.commit()
     conn.close()
     return jsonify(status="ok", session_id=sid)
