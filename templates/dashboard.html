@@ -19,10 +19,10 @@
 </style>
 </head>
 <body>
-<h2>Dashboard Phân tích Thói quen Gõ phím</h2>
+<h2>Dashboard Phân tích thói quen Gõ phím</h2>
 <p><a href="/">← Chơi lại</a></p>
 
-<h3>Xu hướng WPM (20 lượt gần nhất)</h3>
+<h3>Xu hướng WPM & Accuracy (20 lượt gần nhất)</h3>
 <canvas id="wpmChart" height="120"></canvas>
 
 <h3>Bản đồ nhiệt bàn phím (đỏ = hay sai)</h3>
@@ -49,13 +49,65 @@
 
 <script>
 const wpmData = {{ wpm_history | tojson }};
+const accData = {{ acc_history | tojson }};
 new Chart(document.getElementById('wpmChart'), {
   type: 'line',
   data: {
     labels: wpmData.map((_, i) => i + 1),
-    datasets: [{ label: 'WPM', data: wpmData, borderColor: '#8be9fd', tension: 0.3 }]
+    datasets: [
+      { 
+        label: 'WPM', 
+        data: wpmData, 
+        borderColor: '#8be9fd', 
+        backgroundColor: 'rgba(139, 233, 253, 0.1)',
+        tension: 0.3,
+        yAxisID: 'y'
+      },
+      { 
+        label: 'Accuracy %', 
+        data: accData, 
+        borderColor: '#7CFC9A', 
+        backgroundColor: 'rgba(124, 252, 154, 0.1)',
+        tension: 0.3,
+        yAxisID: 'y1'
+      }
+    ]
   },
-  options: { scales: { y: { beginAtZero: true } } }
+  options: {
+    responsive: true,
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
+    scales: {
+      y: {
+        type: 'linear',
+        display: true,
+        position: 'left',
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'WPM',
+          color: '#8be9fd'
+        }
+      },
+      y1: {
+        type: 'linear',
+        display: true,
+        position: 'right',
+        beginAtZero: true,
+        max: 100,
+        title: {
+          display: true,
+          text: 'Accuracy %',
+          color: '#7CFC9A'
+        },
+        grid: {
+          drawOnChartArea: false,
+        },
+      },
+    }
+  }
 });
 </script>
 </body>

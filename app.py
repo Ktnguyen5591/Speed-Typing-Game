@@ -116,10 +116,11 @@ def dashboard():
         cls = "k-bad" if errs > 3 else "k-mid" if errs > 0 else "k-ok"
         heat[r["expected"]] = {"cls": cls, "errs": errs, "delay": r["avg_delay"]}
 
-    wpm_history = [s["wpm"] for s in reversed(sessions)]
+        wpm_history = [s["wpm"] for s in reversed(sessions)]
+    acc_history = [s["accuracy"] for s in reversed(sessions)]
     return render_template("dashboard.html", sessions=sessions,
-                           layout=KB_LAYOUT, heat=heat, wpm_history=wpm_history)
-
+                           layout=KB_LAYOUT, heat=heat,
+                           wpm_history=wpm_history, acc_history=acc_history)
 
 if __name__ == "__main__":
     app.run(debug=True)
