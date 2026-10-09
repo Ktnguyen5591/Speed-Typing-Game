@@ -9,17 +9,29 @@
   .ok { color:#7CFC9A; } .bad { color:#ff5c5c; } .cur { background:#444; } .todo { color:#777; }
   #stats { margin:20px; color:#ffd166; }
   a { color:#8be9fd; }
+  #modeBar { margin:10px; color:#aaa; }
+  #modeBar label { color:#ffd166; cursor:pointer; user-select:none; }
+  button { font-family:monospace; background:#2e7d32; color:#eee; border:none;
+           border-radius:6px; padding:6px 14px; cursor:pointer; }
+  button:hover { background:#3e9d42; }
 </style>
 </head>
 <body>
 <h2>Speed Typing Web</h2>
+<p id="modeBar">
+  <label><input type="checkbox" id="adaptive"> Adaptive Mode (tự luyện phím yếu)</label>
+  &nbsp;|&nbsp; Chế độ ván hiện tại: <span id="modeLabel">Normal</span>
+</p>
 <p id="stats">Time: <span id="time">0.0</span>s | WPM: <span id="wpm">0</span> | Acc: <span id="acc">100</span>%</p>
 <p id="sentence"></p>
 <p id="msg">Bấm phím bất kỳ để bắt đầu...</p>
 <script>
-const sentence = {{ sentence | tojson }};
-const TOKEN = {{ token | tojson }};
+let sentence = {{ sentence | tojson }};
+let TOKEN = {{ token | tojson }};
+let currentMode = 'normal';
+
 const el = document.getElementById('sentence');
+const msg = document.getElementById('msg');
 let idx = 0, start = null, last = null, keys = [], correctCount = 0, done = false;
 
 function render() {
@@ -29,6 +41,32 @@ function render() {
   }).join('');
 }
 render();
+
+function resetStats() {
+  document.getElementById('time').textContent = '0.0';
+  document.getElementById('wpm').textContent = '0';
+  document.getElementById('acc').textContent = '100';
+}
+
+async function newRound() {
+  const mode = document.getElementById('adaptive').checked ? 'adaptive' : 'normal';
+  const r = await fetch('/api/sentence?mode=' + mode).then(res => res.json());
+  sentence = r.sentence;
+  TOKEN = r.token;
+  currentMode = r.mode;
+  idx = 0; keys = []; correctCount = 0; start = null; last = null; done = false;
+  document.getElementById('modeLabel').textContent =
+    currentMode === 'adaptive' ? 'Adaptive (phím yếu)' : 'Normal';
+  msg.textContent = 'Bấm phím bất kỳ để bắt đầu...';
+  resetStats();
+  render();
+}
+
+// Gạt chế độ khi chưa gõ phím nào -> đổi câu liền cho nóng
+document.getElementById('adaptive').addEventListener('change', e => {
+  e.target.blur();                      // nhả focus, tránh phím Space bấm nhầm nút gạt
+  if (!done && start === null && idx === 0) newRound();
+});
 
 document.addEventListener('keydown', e => {
   if (done) return;
@@ -40,7 +78,7 @@ document.addEventListener('keydown', e => {
   if (e.key.length !== 1) return;
   e.preventDefault();
   const now = performance.now();
-  if (start === null) { start = now; document.getElementById('msg').textContent = 'Gõ đi!'; }
+  if (start === null) { start = now; msg.textContent = 'Gõ đi!'; }
   const delay = last ? Math.round(now - last) : 0;
   last = now;
   const expected = sentence[idx];
@@ -60,16 +98,13 @@ document.addEventListener('keydown', e => {
 function finish(elapsed, wpm) {
   done = true;
   const acc = Math.round(correctCount / keys.length * 100);
-  document.getElementById('msg').innerHTML =
+  msg.innerHTML =
     'Xong! WPM: ' + Math.round(wpm) + ' | Accuracy: ' + acc +
-    '% — <a href="/dashboard">Xem Dashboard</a> hoặc <a href="/">chơi lại</a>';
+    '% — <button onclick="newRound()">Ván tiếp</button> hoặc <a href="/dashboard">Xem Dashboard</a>';
   fetch('/api/submit', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      token: TOKEN,
-      keystrokes: keys
-    })
+    body: JSON.stringify({ token: TOKEN, keystrokes: keys })
   });
 }
 </script>

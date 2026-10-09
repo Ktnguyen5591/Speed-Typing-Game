@@ -1,8 +1,13 @@
-"""Speed Typing Game - Flask web app + analytics dashboard."""
+"""Speed Typing Game - Flask web app + analytics dashboard.
+
+Phạm vi Thành viên 1: logic game, telemetry nhịp gõ (delay_ms),
+ghi log CSV, hai chế độ Normal/Adaptive, dashboard phân tích.
+"""
 
 # ==================================================================
 # 1. IMPORTS
 # ==================================================================
+import csv
 import os
 import random
 import secrets
@@ -19,6 +24,7 @@ from flask import Flask, render_template, request, jsonify
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "typing.db")
 SENTENCES_PATH = os.path.join(BASE_DIR, "sentences.txt")
+CSV_PATH = os.path.join(BASE_DIR, "keystrokes_log.csv")
 
 UTC_TZ = ZoneInfo("UTC")
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -30,6 +36,7 @@ LAST_SUBMIT = {}      # chặn spam theo IP
 
 MIN_AVG_DELAY_MS = 60   # trung bình < 60ms/phím => siêu nhân (~200 WPM+)
 MAX_WPM = 250
+ADAPTIVE_TOP_N = 3      # Adaptive: rơi ngẫu nhiên vào top N câu "khoai" nhất
 
 app = Flask(__name__)
 
@@ -85,15 +92,65 @@ def build_heatmap(rows):
     return heat
 
 
+def log_csv(session_id, sentence, keystrokes):
+    """Telemetry: nối từng nhịp gõ vào keystrokes_log.csv (đúng đề bài)."""
+    new_file = not os.path.exists(CSV_PATH)
+    ts = datetime.now(VN_TZ).isoformat(timespec="milliseconds")
+    with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if new_file:
+            w.writerow(["timestamp", "session_id", "expected",
+                        "typed", "correct", "delay_ms"])
+        for i, k in enumerate(keystrokes):
+            w.writerow([ts, session_id, sentence[i], k.get("typed", ""),
+                        1 if k.get("typed", "") == sentence[i] else 0,
+                        int(k.get("delay_ms", 0))])
+
+
+def pick_adaptive_sentence():
+    """Adaptive Mode: ưu tiên câu chứa nhiều phím người chơi hay sai."""
+    conn = get_db()
+    rows = conn.execute("""SELECT expected, SUM(correct = 0) AS errs
+                           FROM keystrokes GROUP BY expected""").fetchall()
+    conn.close()
+    errs = {r["expected"]: (r["errs"] or 0) for r in rows}
+    sentences = load_sentences()
+    if not sentences:
+        return ""
+    if not any(errs.values()):
+        return random.choice(sentences)     # chưa có dữ liệu -> chơi thường
+    scored = sorted(sentences,
+                    key=lambda s: sum(errs.get(ch, 0) for ch in s),
+                    reverse=True)
+    return random.choice(scored[:ADAPTIVE_TOP_N])
+
+
+def issue_sentence(mode="normal"):
+    """Phát cặp (token một lần, câu gõ) theo chế độ được chọn."""
+    token = secrets.token_hex(8)
+    sentence = (pick_adaptive_sentence() if mode == "adaptive"
+                else random.choice(load_sentences()))
+    TOKENS[token] = sentence
+    return token, sentence
+
+
 # ==================================================================
 # 5. ROUTES
 # ==================================================================
 @app.route("/")
 def index():
-    token = secrets.token_hex(8)
-    sentence = random.choice(load_sentences())
-    TOKENS[token] = sentence          # server nhớ: token này đi kèm câu này
+    token, sentence = issue_sentence("normal")
     return render_template("index.html", sentence=sentence, token=token)
+
+
+@app.route("/api/sentence")
+def next_sentence():
+    """Cấp câu + token mới cho ván kế tiếp (không cần tải lại trang)."""
+    mode = request.args.get("mode", "normal")
+    if mode not in ("normal", "adaptive"):
+        mode = "normal"
+    token, sentence = issue_sentence(mode)
+    return jsonify(sentence=sentence, token=token, mode=mode)
 
 
 @app.route("/api/submit", methods=["POST"])
@@ -158,6 +215,13 @@ def submit():
              1 if k.get("typed", "") == sentence[i] else 0, int(delays[i])))
     conn.commit()
     conn.close()
+
+    # Telemetry song song: ghi file CSV phục vụ phân tích offline
+    try:
+        log_csv(sid, sentence, keystrokes)
+    except OSError:
+        pass    # file log hỏng cũng không được làm hỏng lượt chơi
+
     return jsonify(status="ok", session_id=sid)
 
 
