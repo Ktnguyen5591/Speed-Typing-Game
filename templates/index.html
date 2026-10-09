@@ -101,7 +101,8 @@ function finish(elapsed, wpm) {
   const acc = Math.round(correctCount / keys.length * 100);
   msg.innerHTML =
     'Xong! WPM: ' + Math.round(wpm) + ' | Accuracy: ' + acc +
-    '% — <button onclick="newRound()">Tiếp tục</button> hoặc <a class="btn" href="/dashboard">Xem Dashboard</a>';
+    '% — <button onclick="newRound()">Tiếp tục</button> hoặc ' +
+    '<button onclick="location.href=\'/dashboard\'">Xem Dashboard</button>';
   fetch('/api/submit', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
